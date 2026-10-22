@@ -16,8 +16,11 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import DOMPurify from 'dompurify'
+import { t } from 'i18next'
 import { Fragment, type CSSProperties, type ReactNode } from 'react'
 import {
+  isUnsafeHtmlUrl,
   shouldOpenLinkInNewTab,
   type ImageNode,
   type LinkNode,
@@ -25,15 +28,13 @@ import {
 } from 'stream-markdown-parser'
 
 import { classifyValue, type FadeRun } from './response-fade'
+import { ImagePreviewContext } from './response-image-context'
 import { ResponseImage } from './response-renderer-image'
 import type { RenderChildren } from './response-types'
 
 const STREAM_FADE_DELAY_VAR = '--stream-fade-delay'
 
-export function renderTextNode(
-  node: TextNode,
-  fadeRun?: FadeRun
-): ReactNode {
+export function renderTextNode(node: TextNode, fadeRun?: FadeRun): ReactNode {
   if (!fadeRun) {
     return node.content
   }
@@ -81,11 +82,57 @@ export function renderLink(
       target={target}
       title={node.title ?? undefined}
     >
-      {renderChildren(node.children)}
+      <ImagePreviewContext.Provider value={false}>
+        {renderChildren(node.children)}
+      </ImagePreviewContext.Provider>
     </a>
   )
 }
 
 export function renderImage(node: ImageNode, key: string): ReactNode {
   return <ResponseImage key={key} node={node} />
+}
+
+export function renderVideo(content: string, key: string): ReactNode {
+  const fragment = DOMPurify.sanitize(content, {
+    ALLOWED_TAGS: ['video', 'source'],
+    ALLOWED_ATTR: ['src', 'loop', 'type'],
+    RETURN_DOM_FRAGMENT: true,
+  })
+  const video = fragment.querySelector('video')
+  const src = video?.getAttribute('src') || ''
+  const sources = [...(video?.querySelectorAll('source[src]') ?? [])].filter(
+    (source) => {
+      const url = source.getAttribute('src') || ''
+      return url && !isUnsafeHtmlUrl(url, { tagName: 'video', attrName: 'src' })
+    }
+  )
+
+  if (
+    (!src && sources.length === 0) ||
+    (src && isUnsafeHtmlUrl(src, { tagName: 'video', attrName: 'src' }))
+  ) {
+    return <span key={key}>{content}</span>
+  }
+
+  return (
+    <video
+      aria-label={t('Video')}
+      className='border-border/70 my-4 block max-h-[60vh] w-full max-w-full rounded-lg border bg-black'
+      controls
+      key={key}
+      loop={video?.hasAttribute('loop')}
+      playsInline
+      preload='metadata'
+      src={src || undefined}
+    >
+      {sources.map((source) => (
+        <source
+          key={`${source.getAttribute('src')}:${source.getAttribute('type')}`}
+          src={source.getAttribute('src') ?? undefined}
+          type={source.getAttribute('type') ?? undefined}
+        />
+      ))}
+    </video>
+  )
 }

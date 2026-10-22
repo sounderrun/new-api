@@ -116,7 +116,9 @@ export type ThemeCustomization = {
 }
 
 export const DEFAULT_THEME_CUSTOMIZATION: ThemeCustomization = {
-  preset: 'default',
+  // LOCAL PATCH: ship the Anthropic look (cream/ink/clay + editorial serif)
+  // as the factory default. Users can still switch presets in settings.
+  preset: 'anthropic',
   font: 'default',
   radius: 'default',
   scale: 'default',

@@ -16,9 +16,14 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useState } from 'react'
+import { useContext, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { sanitizeImageSrc, type ImageNode } from 'stream-markdown-parser'
+
+import { Dialog } from '@/components/dialog'
+import { Button } from '@/components/ui/button'
+
+import { ImagePreviewContext } from './response-image-context'
 
 type ResponseImageProps = {
   node: ImageNode
@@ -26,6 +31,7 @@ type ResponseImageProps = {
 
 export function ResponseImage(props: ResponseImageProps) {
   const { t } = useTranslation()
+  const preview = useContext(ImagePreviewContext)
   const [hasError, setHasError] = useState(false)
   const src = sanitizeImageSrc(props.node.src)
 
@@ -37,7 +43,7 @@ export function ResponseImage(props: ResponseImageProps) {
     )
   }
 
-  return (
+  const image = (
     <img
       alt={props.node.alt}
       className='border-border/70 my-4 block h-auto max-h-96 max-w-full rounded-lg border object-contain'
@@ -46,5 +52,33 @@ export function ResponseImage(props: ResponseImageProps) {
       src={src}
       title={props.node.title ?? undefined}
     />
+  )
+
+  if (!preview) return image
+
+  return (
+    <Dialog
+      title={t('Image Preview')}
+      description={t('View the generated image')}
+      headerClassName='sr-only'
+      contentClassName='max-w-[calc(100vw-2rem)] gap-0 sm:max-w-[calc(100vw-4rem)]'
+      bodyClassName='flex items-center justify-center'
+      trigger={
+        <Button
+          aria-label={t('Image Preview')}
+          variant='ghost'
+          className='block h-auto max-w-full cursor-zoom-in p-0 hover:bg-transparent'
+        >
+          {image}
+        </Button>
+      }
+    >
+      <img
+        alt={props.node.alt}
+        className='max-h-[calc(100dvh-6rem)] w-full object-contain'
+        onError={() => setHasError(true)}
+        src={src}
+      />
+    </Dialog>
   )
 }

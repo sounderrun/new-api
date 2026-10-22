@@ -17,20 +17,42 @@ import (
 func RefreshAuth(c *gin.Context) {
 	setAuthNoStore(c)
 	rawRefreshToken, err := c.Cookie(service.RefreshCookieName)
-	if err != nil || rawRefreshToken == "" {
-		service.ClearRefreshCookie(c)
-		writeAuthSessionError(c, service.ErrRefreshTokenInvalid)
-		return
-	}
-	bundle, user, err := service.RefreshLoginSession(rawRefreshToken, c.GetHeader("X-Auth-Session"), c.ClientIP(), c.Request.UserAgent())
-	if err != nil {
+	if err == nil && rawRefreshToken != "" {
+		bundle, user, err := service.RefreshLoginSession(rawRefreshToken, c.GetHeader("X-Auth-Session"), c.ClientIP(), c.Request.UserAgent())
+		if err == nil {
+			service.WriteRefreshCookie(c, bundle.RefreshToken)
+			writeAuthBundle(c, bundle, user)
+			return
+		}
 		if errors.Is(err, service.ErrRefreshTokenInvalid) || errors.Is(err, service.ErrLoginSessionRevoked) {
 			service.ClearRefreshCookie(c)
 		}
+	}
+	// LOCAL PATCH (no-login): single-user local deployment. When no valid
+	// refresh session exists, transparently issue a genuine login session for
+	// user 1 (root) so the dashboard never shows the sign-in page. All
+	// downstream auth (access tokens, rotation, step-up) behaves exactly as
+	// after a manual login. Kept as local_no_login.patch for future rebuilds.
+	localAutoLogin(c)
+}
+
+// localAutoLogin issues a real login session for user 1 without credentials.
+func localAutoLogin(c *gin.Context) {
+	user, err := model.GetUserById(1, false)
+	if err != nil {
+		writeAuthSessionError(c, service.ErrRefreshTokenInvalid)
+		return
+	}
+	bundle, err := service.CreateLoginSession(user.Id, "local-auto", c.ClientIP(), c.Request.UserAgent())
+	if err != nil {
 		writeAuthSessionError(c, err)
 		return
 	}
 	service.WriteRefreshCookie(c, bundle.RefreshToken)
+	writeAuthBundle(c, bundle, user)
+}
+
+func writeAuthBundle(c *gin.Context, bundle *service.AuthBundle, user *model.User) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",

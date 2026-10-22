@@ -27,9 +27,7 @@ import {
   LayoutDashboard,
   ListTodo,
   MessageSquare,
-  PlugZap,
   Radio,
-  ServerCog,
   Settings,
   ShieldCheck,
   Ticket,
@@ -40,7 +38,6 @@ import {
 import { useTranslation } from 'react-i18next'
 
 import type { SidebarData } from '@/components/layout/types'
-import { ROLE } from '@/lib/roles'
 
 /**
  * Root navigation groups for the application sidebar.
@@ -157,18 +154,8 @@ export function useSidebarData(): SidebarData {
             url: '/subscriptions',
             icon: CreditCard,
           },
-          {
-            title: t('System Info'),
-            url: '/system-info',
-            icon: ServerCog,
-            requiredRole: ROLE.SUPER_ADMIN,
-          },
-          {
-            title: t('Task Plugins'),
-            url: '/task-plugins',
-            icon: PlugZap,
-            requiredRole: ROLE.SUPER_ADMIN,
-          },
+          // LOCAL PATCH: System Info and Task Plugins entries removed —
+          // unused in this single-user local deployment.
           {
             title: t('System Settings'),
             url: '/system-settings/site',

@@ -31,7 +31,6 @@ import { IconSidebarInset } from '@/assets/custom/icon-sidebar-inset'
 import { IconSidebarSidebar } from '@/assets/custom/icon-sidebar-sidebar'
 import { IconThemeDark } from '@/assets/custom/icon-theme-dark'
 import { IconThemeLight } from '@/assets/custom/icon-theme-light'
-import { IconThemeSystem } from '@/assets/custom/icon-theme-system'
 import {
   sideDrawerContentClassName,
   sideDrawerFooterClassName,
@@ -224,12 +223,11 @@ function ThemeConfig() {
       <Radio
         value={theme}
         onValueChange={setTheme}
-        className='grid w-full max-w-md grid-cols-3 gap-4'
+        className='grid w-full max-w-md grid-cols-2 gap-4'
         aria-label={t('Select theme preference')}
         aria-describedby='theme-description'
       >
         {[
-          { value: 'system', label: t('System'), icon: IconThemeSystem },
           { value: 'light', label: t('Light'), icon: IconThemeLight },
           { value: 'dark', label: t('Dark'), icon: IconThemeDark },
         ].map((item) => (
@@ -237,7 +235,7 @@ function ThemeConfig() {
         ))}
       </Radio>
       <div id='theme-description' className='sr-only'>
-        {t('Choose between system preference, light mode, or dark mode')}
+        {t('Toggle between light mode and dark mode')}
       </div>
     </div>
   )

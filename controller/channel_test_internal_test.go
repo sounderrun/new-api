@@ -13,10 +13,12 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
+	perfmetrics "github.com/QuantumNous/new-api/pkg/perf_metrics"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -324,6 +326,106 @@ func TestResolveChannelTestUserIDUsesRequestUser(t *testing.T) {
 
 	require.NoError(t, err)
 	require.Equal(t, 2, userID)
+}
+
+func TestChannelChecksPopulateModelStatus(t *testing.T) {
+	oldRatios, err := common.Marshal(ratio_setting.GetModelRatioCopy())
+	require.NoError(t, err)
+	require.NoError(t, ratio_setting.UpdateModelRatioByJSONString(`{"gpt-4o-mini":1}`))
+	t.Cleanup(func() { require.NoError(t, ratio_setting.UpdateModelRatioByJSONString(string(oldRatios))) })
+	oldConsumeLogging := common.LogConsumeEnabled
+	common.LogConsumeEnabled = false
+	t.Cleanup(func() { common.LogConsumeEnabled = oldConsumeLogging })
+	oldTimeout := constant.StreamingTimeout
+	constant.StreamingTimeout = 30
+	t.Cleanup(func() { constant.StreamingTimeout = oldTimeout })
+	service.InitHttpClient()
+
+	for _, tc := range []struct {
+		name        string
+		status      int
+		body        string
+		stream      bool
+		cancel      bool
+		unsupported bool
+		wantRate    float64
+		wantSample  bool
+	}{
+		{name: "success", status: 200, body: `{"choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":2,"total_tokens":3}}`, wantRate: 100, wantSample: true},
+		{name: "upstream-failure", status: 503, body: `{"error":{"message":"unavailable","type":"server_error"}}`, wantSample: true},
+		{name: "business-rejection", status: 400, body: `{"error":{"message":"invalid input","type":"invalid_request_error","code":"context_length_exceeded"}}`},
+		{name: "stream-business-rejection", status: 200, stream: true, body: "data: {\"error\":{\"message\":\"invalid input\",\"type\":\"invalid_request_error\",\"code\":\"context_length_exceeded\"}}\n\ndata: [DONE]\n\n"},
+		{name: "stream-upstream-failure", status: 200, stream: true, body: "data: {\"error\":{\"message\":\"unavailable\",\"type\":\"server_error\"}}\n\ndata: [DONE]\n\n", wantSample: true},
+		{name: "broken-response", status: 200, body: `{`, wantSample: true},
+		{name: "stream-success", status: 200, stream: true, body: "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"ok\"},\"finish_reason\":null}]}\n\ndata: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":2,\"total_tokens\":3}}\n\ndata: [DONE]\n\n", wantRate: 100, wantSample: true},
+		{name: "cancelled", cancel: true, status: 503, body: `{"error":{"message":"unavailable","type":"server_error"}}`},
+		{name: "unsupported", unsupported: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db := setupModelListControllerTestDB(t)
+			require.NoError(t, db.AutoMigrate(&model.PerfMetric{}))
+			group := "channel-status-" + tc.name
+			require.NoError(t, db.Create(&model.User{Id: 17001, Username: "status-test", Group: group, Status: common.UserStatusEnabled}).Error)
+			var calls atomic.Int32
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls.Add(1)
+				var request struct {
+					Model string `json:"model"`
+				}
+				assert.NoError(t, common.DecodeJson(r.Body, &request))
+				assert.Equal(t, "upstream-test-model", request.Model)
+				contentType := "application/json"
+				if tc.stream {
+					contentType = "text/event-stream"
+				}
+				w.Header().Set("Content-Type", contentType)
+				w.WriteHeader(tc.status)
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			t.Cleanup(upstream.Close)
+			channel := &model.Channel{
+				Id: 17001, Type: constant.ChannelTypeOpenAI, Name: "status-test", Key: "test-only",
+				BaseURL: &upstream.URL, Models: "gpt-4o-mini,untested-model", Group: group,
+				ModelMapping: common.GetPointer(`{"gpt-4o-mini":"upstream-test-model"}`),
+			}
+			if tc.unsupported {
+				channel.Type = constant.ChannelTypeTaskPlugin
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			t.Cleanup(cancel)
+			if tc.cancel {
+				cancel()
+			}
+
+			result := testChannel(ctx, channel, 17001, "gpt-4o-mini", "", tc.stream)
+			if tc.wantSample && tc.wantRate == 100 {
+				require.NoError(t, result.localErr)
+			} else {
+				require.Error(t, result.localErr)
+			}
+			wantCalls := int32(1)
+			if tc.unsupported {
+				wantCalls = 0
+			}
+			if tc.cancel {
+				assert.LessOrEqual(t, calls.Load(), int32(1))
+			} else {
+				assert.Equal(t, wantCalls, calls.Load())
+			}
+			summary, err := perfmetrics.QuerySummaryAll(24, []string{group})
+			require.NoError(t, err)
+			if !tc.wantSample {
+				assert.Empty(t, summary.Models)
+				return
+			}
+			require.Len(t, summary.Models, 1)
+			assert.Equal(t, "gpt-4o-mini", summary.Models[0].ModelName)
+			assert.Equal(t, int64(1), summary.Models[0].RequestCount)
+			assert.Equal(t, tc.wantRate, summary.Models[0].SuccessRate)
+			require.Len(t, summary.Models[0].RecentSuccessSeries, 1)
+			assert.Equal(t, tc.wantRate, summary.Models[0].RecentSuccessSeries[0].SuccessRate)
+		})
+	}
 }
 
 func TestSelectChannelsForAutomaticTestPassiveRecoveryOnlyUsesAutoDisabled(t *testing.T) {

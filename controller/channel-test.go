@@ -19,6 +19,7 @@ import (
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
+	perfmetrics "github.com/QuantumNous/new-api/pkg/perf_metrics"
 	"github.com/QuantumNous/new-api/relay"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
@@ -69,7 +70,7 @@ func resolveChannelTestUserID(c *gin.Context) (int, error) {
 	return rootUser.Id, nil
 }
 
-func testChannel(ctx context.Context, channel *model.Channel, testUserID int, testModel string, endpointType string, isStream bool) testResult {
+func testChannel(ctx context.Context, channel *model.Channel, testUserID int, testModel string, endpointType string, isStream bool) (outcome testResult) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -433,6 +434,13 @@ func testChannel(ctx context.Context, channel *model.Channel, testUserID int, te
 
 	requestBody := bytes.NewBuffer(jsonData)
 	c.Request.Body = io.NopCloser(bytes.NewBuffer(jsonData))
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			perfmetrics.RecordRelayResult(ctx, info, types.NewError(fmt.Errorf("channel test panic: %v", recovered), types.ErrorCodeBadResponse))
+			panic(recovered)
+		}
+		perfmetrics.RecordRelayResult(ctx, info, outcome.newAPIError)
+	}()
 	resp, err := adaptor.DoRequest(c, info, requestBody)
 	if err != nil {
 		return testResult{
@@ -496,6 +504,7 @@ func testChannel(ctx context.Context, channel *model.Channel, testUserID int, te
 		}
 	}
 	info.SetEstimatePromptTokens(usage.PromptTokens)
+	info.PerformanceOutputTokens = int64(usage.CompletionTokens)
 
 	quota, tieredResult := settleTestQuota(info, priceData, usage)
 	tok := time.Now()
@@ -609,8 +618,8 @@ func detectErrorFromTestResponseBody(respBody []byte) error {
 	if len(b) == 0 {
 		return nil
 	}
-	if message := detectErrorMessageFromJSONBytes(b); message != "" {
-		return fmt.Errorf("upstream error: %s", message)
+	if err := detectErrorFromTestJSONBytes(b); err != nil {
+		return err
 	}
 
 	for line := range bytes.SplitSeq(b, []byte{'\n'}) {
@@ -625,8 +634,8 @@ func detectErrorFromTestResponseBody(respBody []byte) error {
 		if len(payload) == 0 || bytes.Equal(payload, []byte("[DONE]")) {
 			continue
 		}
-		if message := detectErrorMessageFromJSONBytes(payload); message != "" {
-			return fmt.Errorf("upstream error: %s", message)
+		if err := detectErrorFromTestJSONBytes(payload); err != nil {
+			return err
 		}
 	}
 
@@ -669,16 +678,16 @@ func shouldUseStreamForAutomaticChannelTest(channel *model.Channel) bool {
 	return channel != nil && channel.Type == constant.ChannelTypeCodex
 }
 
-func detectErrorMessageFromJSONBytes(jsonBytes []byte) string {
+func detectErrorFromTestJSONBytes(jsonBytes []byte) error {
 	if len(jsonBytes) == 0 {
-		return ""
+		return nil
 	}
 	if jsonBytes[0] != '{' && jsonBytes[0] != '[' {
-		return ""
+		return nil
 	}
 	errVal := gjson.GetBytes(jsonBytes, "error")
 	if !errVal.Exists() || errVal.Type == gjson.Null {
-		return ""
+		return nil
 	}
 
 	message := gjson.GetBytes(jsonBytes, "error.message").String()
@@ -693,9 +702,16 @@ func detectErrorMessageFromJSONBytes(jsonBytes []byte) string {
 	}
 	message = strings.TrimSpace(message)
 	if message == "" {
-		return "upstream returned error payload"
+		message = "upstream returned error payload"
 	}
-	return message
+	if nested := errVal.Get("error"); nested.Exists() {
+		errVal = nested
+	}
+	return types.WithOpenAIError(types.OpenAIError{
+		Message: "upstream error: " + message,
+		Type:    errVal.Get("type").String(),
+		Code:    errVal.Get("code").Value(),
+	}, http.StatusInternalServerError)
 }
 
 func buildTestRequest(model string, endpointType string, channel *model.Channel, isStream bool) dto.Request {

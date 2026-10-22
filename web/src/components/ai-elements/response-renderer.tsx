@@ -51,6 +51,7 @@ import {
   renderImage,
   renderLink,
   renderTextNode,
+  renderVideo,
 } from './response-renderer-inline'
 import { renderTable } from './response-renderer-table'
 import type { BlockRendererOptions, RenderChildren } from './response-types'
@@ -236,6 +237,18 @@ function renderNode(
     return renderDetails(node, key, {
       renderChildren: settledRenderChildren,
     })
+  }
+
+  if (
+    (node.type === 'html_block' || node.type === 'html_inline') &&
+    'tag' in node &&
+    String(node.tag).toLowerCase() === 'video' &&
+    'content' in node
+  ) {
+    if (node.loading || ('autoClosed' in node && node.autoClosed)) {
+      return null
+    }
+    return renderVideo(String(node.content), key)
   }
 
   if (node.type === 'html_block' && 'content' in node) {

@@ -472,9 +472,9 @@ export function OverviewDashboard() {
     faq: showFAQPanel,
     uptimeKuma: showUptimePanel,
   } = useDashboardContentVisibility()
-  const [manualSetupGuideExpanded, setManualSetupGuideExpanded] = useState<
-    boolean | null
-  >(() => getSavedSetupGuideExpanded())
+  const [, setManualSetupGuideExpanded] = useState<boolean | null>(() =>
+    getSavedSetupGuideExpanded()
+  )
 
   const requestCount = Number(user?.request_count ?? 0)
   const remainQuota = Number(user?.quota ?? 0)
@@ -611,9 +611,8 @@ export function OverviewDashboard() {
 
   const completedStepCount = startSteps.filter((step) => step.completed).length
   const setupComplete = completedStepCount === startSteps.length
-  const setupStatusReady = apiKeysQuery.isFetched && Boolean(user)
-  const setupGuideExpanded =
-    manualSetupGuideExpanded ?? (setupStatusReady && !setupComplete)
+  // LOCAL PATCH: onboarding checklist removed — single-user local deployment.
+  const setupGuideExpanded = false as boolean
   const showLeftContentPanels =
     isAdmin || showApiInfoPanel || showAnnouncementsPanel || showFAQPanel
   const showContentPanels = showLeftContentPanels || showUptimePanel
@@ -630,21 +629,7 @@ export function OverviewDashboard() {
   return (
     <SectionPageLayout>
       <SectionPageLayout.Title>{t('Overview')}</SectionPageLayout.Title>
-      <SectionPageLayout.Actions>
-        {setupStatusReady && setupComplete && (
-          <Button
-            ref={setupGuideToggleRef}
-            variant='ghost'
-            size='sm'
-            className='text-muted-foreground hover:text-foreground h-auto min-h-7 max-w-[60vw] whitespace-normal'
-            aria-expanded={setupGuideExpanded}
-            aria-controls={setupGuideId}
-            onClick={handleSetupGuideToggle}
-          >
-            {t('Setup guide')}
-          </Button>
-        )}
-      </SectionPageLayout.Actions>
+      {/* LOCAL PATCH: Setup guide toggle removed — single-user local deployment. */}
       <SectionPageLayout.Content>
         <div className='flex flex-col gap-4'>
           <div id={setupGuideId} hidden={!setupGuideExpanded}>

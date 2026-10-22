@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useLocation, useNavigate } from '@tanstack/react-router'
-import { ArrowRight, ChevronRight, Laptop, Moon, Sun } from 'lucide-react'
+import { ArrowRight, ChevronRight, Moon, Sun } from 'lucide-react'
 import React from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -33,6 +33,7 @@ import {
 } from '@/components/ui/command'
 import { useSearch } from '@/context/search-provider'
 import { useTheme } from '@/context/theme-provider'
+import { useSidebarConfig } from '@/hooks/use-sidebar-config'
 import { useSidebarData } from '@/hooks/use-sidebar-data'
 
 import { getNavGroupsForPath } from './layout/lib/sidebar-view-registry'
@@ -48,7 +49,10 @@ export function CommandMenu() {
 
   // Use the active nested sidebar view's nav groups when one matches
   // the current URL; otherwise fall back to the root navigation.
-  const navGroups = getNavGroupsForPath(pathname, t) ?? sidebarData.navGroups
+  // LOCAL PATCH: run the same sidebar_modules filter the sidebar uses, so the
+  // command menu can never surface entries that are hidden from navigation.
+  const rawNavGroups = getNavGroupsForPath(pathname, t) ?? sidebarData.navGroups
+  const navGroups = useSidebarConfig(rawNavGroups)
 
   const runCommand = React.useCallback(
     (command: () => unknown) => {
@@ -109,12 +113,6 @@ export function CommandMenu() {
               <CommandItem onSelect={() => runCommand(() => setTheme('dark'))}>
                 <Moon className='scale-90' />
                 <span>{t('Dark')}</span>
-              </CommandItem>
-              <CommandItem
-                onSelect={() => runCommand(() => setTheme('system'))}
-              >
-                <Laptop />
-                <span>{t('System')}</span>
               </CommandItem>
             </CommandGroup>
           </ScrollArea>
