@@ -24,6 +24,7 @@ import {
   RouterProvider,
 } from '@tanstack/react-router'
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { api } from '@/lib/api'
@@ -107,6 +108,52 @@ async function renderOverview() {
 }
 
 describe('overview setup guide', () => {
+  it('opens and closes incomplete setup with the keyboard and remembers the choice', async () => {
+    useAuthStore.getState().auth.setUser({
+      id: 1,
+      username: 'dashboard-user',
+      role: 1,
+      quota: 1000000,
+    })
+    const user = userEvent.setup()
+    await renderOverview()
+
+    const show = screen.getByRole('button', { name: 'Show setup guide' })
+    expect(show).toHaveAttribute('aria-expanded', 'false')
+    const panel = document.getElementById(
+      show.getAttribute('aria-controls') ?? ''
+    )
+    expect(panel).not.toBeVisible()
+    show.focus()
+    await user.keyboard('{Enter}')
+
+    const hide = screen.getByRole('button', { name: 'Hide setup guide' })
+    expect(hide).toHaveAttribute('aria-expanded', 'true')
+    expect(panel).toBeVisible()
+    expect(localStorage.getItem(storageKey)).toBe('expanded')
+    cleanup()
+    await renderOverview()
+    expect(
+      screen.getByRole('button', { name: 'Hide setup guide' })
+    ).toBeVisible()
+
+    await user.click(screen.getByRole('button', { name: 'Hide setup guide' }))
+    expect(
+      screen.getByRole('button', { name: 'Show setup guide' })
+    ).toBeVisible()
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'Show setup guide' })
+      ).toHaveFocus()
+    )
+    expect(localStorage.getItem(storageKey)).toBe('collapsed')
+    cleanup()
+    await renderOverview()
+    expect(
+      screen.getByRole('button', { name: 'Show setup guide' })
+    ).toHaveAttribute('aria-expanded', 'false')
+  })
+
   it('shows usage first without setup controls or onboarding when setup is complete', async () => {
     await renderOverview()
 

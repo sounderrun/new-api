@@ -472,9 +472,9 @@ export function OverviewDashboard() {
     faq: showFAQPanel,
     uptimeKuma: showUptimePanel,
   } = useDashboardContentVisibility()
-  const [, setManualSetupGuideExpanded] = useState<boolean | null>(() =>
-    getSavedSetupGuideExpanded()
-  )
+  const [manualSetupGuideExpanded, setManualSetupGuideExpanded] = useState<
+    boolean | null
+  >(() => getSavedSetupGuideExpanded())
 
   const requestCount = Number(user?.request_count ?? 0)
   const remainQuota = Number(user?.quota ?? 0)
@@ -611,8 +611,10 @@ export function OverviewDashboard() {
 
   const completedStepCount = startSteps.filter((step) => step.completed).length
   const setupComplete = completedStepCount === startSteps.length
-  // LOCAL PATCH: onboarding checklist removed — single-user local deployment.
-  const setupGuideExpanded = false as boolean
+  const setupGuideExpanded =
+    apiKeysQuery.isFetched &&
+    !setupComplete &&
+    (manualSetupGuideExpanded ?? false)
   const showLeftContentPanels =
     isAdmin || showApiInfoPanel || showAnnouncementsPanel || showFAQPanel
   const showContentPanels = showLeftContentPanels || showUptimePanel
@@ -621,8 +623,8 @@ export function OverviewDashboard() {
     const nextExpanded = !setupGuideExpanded
     setManualSetupGuideExpanded(nextExpanded)
     saveSetupGuideExpanded(nextExpanded)
-    if (!nextExpanded && setupComplete) {
-      setupGuideToggleRef.current?.focus()
+    if (!nextExpanded) {
+      requestAnimationFrame(() => setupGuideToggleRef.current?.focus())
     }
   }
 
@@ -755,6 +757,7 @@ export function OverviewDashboard() {
                         />
                       ))}
                       <Button
+                        ref={setupGuideToggleRef}
                         variant='outline'
                         size='sm'
                         className='bg-background/70 h-8 min-w-28'
