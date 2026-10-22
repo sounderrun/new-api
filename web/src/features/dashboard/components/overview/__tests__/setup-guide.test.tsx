@@ -23,8 +23,7 @@ import {
   createRouter,
   RouterProvider,
 } from '@tanstack/react-router'
-import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
-import userEvent from '@testing-library/user-event'
+import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { api } from '@/lib/api'
@@ -99,143 +98,72 @@ async function renderOverview() {
     history: createMemoryHistory({ initialEntries: ['/'] }),
   })
   await router.load()
-  return render(
+  render(
     <QueryClientProvider client={client}>
       <RouterProvider router={router} />
     </QueryClientProvider>
   )
+  await waitFor(() => expect(client.isFetching()).toBe(0))
 }
 
 describe('overview setup guide', () => {
-  it('shows usage first and only a header entry when setup is complete', async () => {
+  it('shows usage first without setup controls or onboarding when setup is complete', async () => {
     await renderOverview()
 
-    const toggle = await screen.findByRole('button', { name: 'Setup guide' })
-    expect(toggle).toHaveAttribute('aria-expanded', 'false')
     expect(
       screen.getAllByRole('heading').map((heading) => heading.textContent)
     ).toEqual(['Overview', 'Usage at a glance'])
+    expect(
+      screen.getByRole('heading', { name: 'Usage at a glance' })
+    ).toBeVisible()
+    expect(
+      screen.queryByRole('button', { name: /setup guide/i })
+    ).not.toBeInTheDocument()
     expect(screen.queryByText('Setup guide complete')).not.toBeInTheDocument()
-    expect(screen.queryByText('Setup progress: 3/3')).not.toBeInTheDocument()
+    expect(screen.queryByText(/Setup progress:/)).not.toBeInTheDocument()
     for (const name of ['API Keys', 'Channels', 'Usage Logs', 'Pricing']) {
       expect(screen.queryByRole('button', { name })).not.toBeInTheDocument()
     }
-    const panel = document.getElementById(
-      toggle.getAttribute('aria-controls') ?? ''
-    )
-    expect(panel).toBeInTheDocument()
-    expect(panel).not.toBeVisible()
   })
 
-  it('toggles the completed guide with the keyboard and restores focus after hiding it', async () => {
-    const user = userEvent.setup()
+  it('does not restore onboarding or setup controls from a legacy expanded preference', async () => {
+    window.localStorage.setItem(storageKey, 'expanded')
     await renderOverview()
-    const toggle = await screen.findByRole('button', { name: 'Setup guide' })
 
-    await user.tab()
-    expect(toggle).toHaveFocus()
-    await user.keyboard('{Enter}')
-    expect(toggle).toHaveAttribute('aria-expanded', 'true')
     expect(
-      document.getElementById(toggle.getAttribute('aria-controls') ?? '')
+      screen.getByRole('heading', { name: 'Usage at a glance' })
     ).toBeVisible()
     expect(
-      screen.getByRole('heading', {
+      screen.queryByRole('heading', {
         name: 'Build on your API gateway in minutes',
       })
-    ).toBeVisible()
-    await waitFor(() =>
-      expect(screen.getByRole('button', { name: /^API Keys/ })).toBeVisible()
-    )
-
-    await user.keyboard(' ')
-    expect(toggle).toHaveAttribute('aria-expanded', 'false')
-    expect(toggle).toHaveFocus()
-    await user.click(toggle)
-    await user.click(screen.getByRole('button', { name: 'Hide setup guide' }))
-    expect(toggle).toHaveAttribute('aria-expanded', 'false')
-    expect(toggle).toHaveFocus()
-  })
-
-  it('restores the completed guide preference after remounting', async () => {
-    const user = userEvent.setup()
-    const first = await renderOverview()
-    await user.click(await screen.findByRole('button', { name: 'Setup guide' }))
-    first.unmount()
-
-    const second = await renderOverview()
-    expect(
-      await screen.findByRole('button', { name: 'Setup guide' })
-    ).toHaveAttribute('aria-expanded', 'true')
-    await user.click(screen.getByRole('button', { name: 'Hide setup guide' }))
-    second.unmount()
-
-    await renderOverview()
-    expect(
-      await screen.findByRole('button', { name: 'Setup guide' })
-    ).toHaveAttribute('aria-expanded', 'false')
-    expect(screen.queryByText('Setup guide complete')).not.toBeInTheDocument()
-  })
-
-  it('keeps the existing progress banner when an incomplete guide is manually collapsed', async () => {
-    const user = userEvent.setup()
-    useAuthStore
-      .getState()
-      .auth.setUser({ id: 1, username: 'new-user', role: 1 })
-    await renderOverview()
-
-    await user.click(
-      await screen.findByRole('button', { name: 'Hide setup guide' })
-    )
-    expect(screen.getByText('Setup progress: 1/3')).toBeVisible()
-    expect(
-      screen.getByText('Setup guide is collapsed. Expand it anytime.')
-    ).toBeVisible()
-    expect(screen.getByRole('button', { name: 'API Keys' })).toBeVisible()
-    expect(
-      screen.queryByRole('button', { name: 'Setup guide' })
     ).not.toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: 'Show setup guide' }))
     expect(
-      screen.getByRole('button', { name: 'Hide setup guide' })
-    ).toBeVisible()
-  })
-
-  it('removes the collapsed progress banner when the remaining setup step completes', async () => {
-    useAuthStore.getState().auth.setUser({
-      id: 1,
-      username: 'dashboard-user',
-      role: 1,
-      quota: 1000000,
-    })
-    window.localStorage.setItem(storageKey, 'collapsed')
-    await renderOverview()
-    expect(await screen.findByText('Setup progress: 2/3')).toBeVisible()
-
-    act(() => {
-      useAuthStore.getState().auth.setUser({
-        id: 1,
-        username: 'dashboard-user',
-        role: 1,
-        quota: 1000000,
-        request_count: 1,
-      })
-    })
-    expect(
-      await screen.findByRole('button', { name: 'Setup guide' })
-    ).toHaveAttribute('aria-expanded', 'false')
+      screen.queryByRole('button', { name: /setup guide/i })
+    ).not.toBeInTheDocument()
     expect(screen.queryByText(/Setup progress:/)).not.toBeInTheDocument()
   })
 
-  it('does not show a completed setup entry when the key lookup fails', async () => {
+  it('keeps usage visible without expanded onboarding when the key lookup fails', async () => {
     keyLookupError = new Error('Key lookup unavailable')
     await renderOverview()
 
     expect(
-      await screen.findByRole('button', { name: 'Hide setup guide' })
+      client.getQueryState(['dashboard', 'overview', 'api-keys'])?.status
+    ).toBe('error')
+    expect(
+      screen.getByRole('heading', { name: 'Usage at a glance' })
     ).toBeVisible()
     expect(
+      screen.queryByRole('heading', {
+        name: 'Build on your API gateway in minutes',
+      })
+    ).not.toBeInTheDocument()
+    expect(
       screen.queryByRole('button', { name: 'Setup guide' })
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: 'Hide setup guide' })
     ).not.toBeInTheDocument()
   })
 })
